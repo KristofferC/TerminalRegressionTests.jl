@@ -2,8 +2,9 @@
 
 [![CI](https://github.com/JuliaDebug/TerminalRegressionTests.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/JuliaDebug/TerminalRegressionTests.jl/actions/workflows/CI.yml)
 
-This package builds upon the [VT100.jl](https://github.com/Keno/VT100.jl)
-package to provide automated testing of terminal based application. Both
+This package uses [libghostty-vt](https://lib.ghostty.org), the terminal
+emulation core of Ghostty, to provide automated testing of terminal based
+applications. Both
 plain text and formatted output is supported. Each test consists of
 
  - The system under test (specified as a callback)
@@ -40,6 +41,23 @@ end
 ```
 
 Note that the callback gets an `emuterm` as an argument. This is an emulated
-VT100 terminal and supports the usual operation. Note that this terminal is the
+terminal and supports the usual operation. Note that this terminal is the
 view from the program under test (i.e. reads from this terminal will obtain
 the specified input data).
+
+# Output format
+
+Each step of an output file holds the screen, including scrollback, as plain
+text, optionally followed by a decorator block with one character per cell,
+where each distinct cell style (colors and attributes) gets its own character.
+Trailing blank cells and rows are not part of the screen, except on the
+cursor's row, which is kept up to the cursor. `TerminalRegressionTests.dump`
+writes this format for an emulator, e.g. for a custom comparison function.
+
+# libghostty-vt
+
+The library is loaded from the path in the `LIBGHOSTTY_VT` environment
+variable, or as `libghostty-vt` from the system library search path. To build
+it from a [release](https://release.files.ghostty.org/libghostty-vt/), see
+`PACKAGING-LIBGHOSTTY.md` in the release tarball; it needs the Zig version
+listed there.

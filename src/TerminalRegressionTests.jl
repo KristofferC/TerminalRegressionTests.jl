@@ -1,7 +1,9 @@
 module TerminalRegressionTests
-    using VT100
     using DeepDiffs
     import REPL
+
+    include("LibGhosttyVT.jl")
+    using .LibGhosttyVT: LibGhosttyVT, cells, cursor
 
     @static if VERSION >= v"1.12-"
         const EmulatedCondition = Threads.Condition
@@ -67,26 +69,43 @@ module TerminalRegressionTests
         outputs, decorators
     end
 
+    mutable struct PTY
+        master::Base.TTY
+        slave::RawFD
+    end
+    Base.close(pty::PTY) = close(pty.master)
+
+    function PTY()
+        Sys.isunix() || error("TerminalRegressionTests requires a Unix PTY")
+        flags = Base.Filesystem.JL_O_RDWR | Base.Filesystem.JL_O_NOCTTY
+        fdm = ccall(:posix_openpt, Cint, (Cint,), flags)
+        fdm == -1 && error("Failed to open PTY master")
+        ccall(:grantpt, Cint, (Cint,), fdm) == 0 || error("grantpt failed")
+        ccall(:unlockpt, Cint, (Cint,), fdm) == 0 || error("unlockpt failed")
+        fds = ccall(:open, Cint, (Ptr{UInt8}, Cint), ccall(:ptsname, Ptr{UInt8}, (Cint,), fdm), flags)
+        fds == -1 && error("Failed to open PTY slave")
+        pty = PTY(Base.TTY(RawFD(fdm)), RawFD(fds))
+        finalizer(close, pty)
+    end
+
     mutable struct EmulatedTerminal <: REPL.Terminals.UnixTerminal
         input_buffer::IOBuffer
         out_stream::Base.TTY
-        # `VT100.PTY` is Unix-only. Keep the field untyped so this module can
-        # still precompile on Windows, where terminal regression tests are skipped.
-        pty
-        terminal::VT100.ScreenEmulator
+        pty::PTY
+        terminal::LibGhosttyVT.Terminal
         waiting::Bool
         step::EmulatedCondition
         filled::EmulatedCondition
         # Yield after every write, e.g. to test for flickering issues
         aggressive_yield::Bool
-        function EmulatedTerminal()
-            pty = VT100.create_pty(false)
-            new(
-                IOBuffer(UInt8[]; read = true, write = true, append = true, truncate = true, maxsize = typemax(Int)),
-                Base.TTY(pty.slave), pty,
-                pty.em, false, EmulatedCondition(), EmulatedCondition()
-            )
-        end
+    end
+
+    function EmulatedTerminal(cols::Integer = 80, rows::Integer = 24)
+        pty = PTY()
+        EmulatedTerminal(
+            IOBuffer(UInt8[]; read = true, write = true, append = true, truncate = true, maxsize = typemax(Int)),
+            Base.TTY(pty.slave), pty, LibGhosttyVT.Terminal(cols, rows),
+            false, EmulatedCondition(), EmulatedCondition(), false)
     end
     if isdefined(REPL.LineEdit, :hascolor)
         @eval REPL.LineEdit.hascolor(::EmulatedTerminal) = true
@@ -170,10 +189,47 @@ module TerminalRegressionTests
         return result
     end
 
+    const default_decorators = ['A':'Z'; 'a':'z'; '0':'9']
+
+    # A blank cell whose style is invisible (no background, not inverse).
+    isblank((text, style)) = text == " " && style[5] == 0x00 && style[13] & 0x10 == 0
+
+    """
+        dump(contents::IO, decorator::IO, em::LibGhosttyVT.Terminal)
+
+    Write the screen of `em`, including scrollback, as plain text to `contents`
+    and as one decorator character per cell to `decorator`, where each distinct
+    cell style gets its own character. Trailing blank cells and rows are dropped,
+    except that the cursor's row is kept up to the cursor.
+    """
+    function dump(contents::IO, decorator::IO, em::LibGhosttyVT.Terminal)
+        crow, ccol = cursor(em)
+        crow += LibGhosttyVT.total_rows(em) - LibGhosttyVT.active_rows(em)
+        rows = [cells(em, row) for row in 1:LibGhosttyVT.total_rows(em)]
+        for (i, row) in enumerate(rows)
+            n = something(findlast(!isblank, row), 0)
+            i == crow && (n = max(n, min(ccol - 1, length(row))))
+            resize!(row, n)
+        end
+        nrows = max(crow, something(findlast(!isempty, rows), 0))
+        styles = Dict{LibGhosttyVT.Style, Char}()
+        available = copy(default_decorators)
+        for (i, row) in enumerate(view(rows, 1:nrows))
+            if i > 1
+                println(contents)
+                println(decorator)
+            end
+            for (text, style) in row
+                print(contents, text)
+                print(decorator, get!(() -> popfirst!(available), styles, style))
+            end
+        end
+    end
+
     function compare(em, output, decorator = nothing)
         buf = IOBuffer()
         decoratorbuf = IOBuffer()
-        VT100.dump(buf,decoratorbuf,em)
+        dump(buf, decoratorbuf, em)
         outbuf = take!(buf)
         decoratorbuf = take!(decoratorbuf)
         _compare(Vector{UInt8}(codeunits(output)), outbuf) || return false
@@ -197,16 +253,12 @@ module TerminalRegressionTests
             process_events_compat()
             sleep(0.01)
         end
-        data = IOBuffer(readavailable(emuterm.pty.master)[1:(end-4)])
-        while bytesavailable(data) > 0
-            VT100.parse!(emuterm.terminal, data)
-        end
+        write(emuterm.terminal, readavailable(emuterm.pty.master)[1:(end-4)])
     end
 
     function automated_test(f, cmp, outputpath, inputs; aggressive_yield = false)
         emuterm = EmulatedTerminal()
         emuterm.aggressive_yield = aggressive_yield
-        emuterm.terminal.warn = true
         outputs, decorators = load_outputs(outputpath)
         c = Condition()
         @async Base.wait_readnb(emuterm.pty.master, typemax(Int64))
@@ -243,7 +295,6 @@ module TerminalRegressionTests
     function create_automated_test(f, outputpath, inputs; aggressive_yield=false)
         emuterm = EmulatedTerminal()
         emuterm.aggressive_yield = aggressive_yield
-        emuterm.terminal.warn = true
         c = Condition()
         @async Base.wait_readnb(emuterm.pty.master, typemax(Int64))
         yield()
@@ -261,7 +312,7 @@ module TerminalRegressionTests
                 process_all_buffered(emuterm)
                 out = IOBuffer()
                 decorator = IOBuffer()
-                VT100.dump(out, decorator, emuterm.terminal)
+                dump(out, decorator, emuterm.terminal)
                 print(emuterm.input_buffer, input); notify_condition(emuterm.filled)
                 out, decorator
             end
