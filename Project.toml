@@ -1,18 +1,21 @@
 name = "TerminalRegressionTests"
 uuid = "98bfdc55-cc95-5876-a49a-74609291cbe0"
-author = ["Keno Fischer <keno@juliacomputing.com>"]
 version = "0.4.0"
+author = ["Keno Fischer <keno@juliacomputing.com>"]
 
 [deps]
 DeepDiffs = "ab62b9b5-e342-54a8-a765-a90f495de1a6"
+GhosttyVT = "075471dd-aa7d-4220-aba8-1cd1bd8c8f35"
 REPL = "3fa0cd96-eef1-5676-8a61-b3b8758bbffb"
-
-[extras]
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+libghostty_vt_jll = "4ca93f84-bb8a-5964-bd82-06337ce2c28e"
 
 [compat]
 DeepDiffs = "1"
+GhosttyVT = "0.1"
 julia = "1.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
 test = ["Test"]

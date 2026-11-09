@@ -73,7 +73,7 @@ end
 
 @testset "dump" begin
     function dumped(bytes)
-        em = TerminalRegressionTests.LibGhosttyVT.Terminal(20, 5)
+        em = TerminalRegressionTests.GhosttyVT.Terminal(20, 5)
         write(em, bytes)
         contents, decorator = IOBuffer(), IOBuffer()
         TerminalRegressionTests.dump(contents, decorator, em)

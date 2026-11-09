@@ -2,8 +2,7 @@ module TerminalRegressionTests
     using DeepDiffs
     import REPL
 
-    include("LibGhosttyVT.jl")
-    using .LibGhosttyVT: LibGhosttyVT, cells, cursor
+    import GhosttyVT
 
     @static if VERSION >= v"1.12-"
         const EmulatedCondition = Threads.Condition
@@ -92,7 +91,7 @@ module TerminalRegressionTests
         input_buffer::IOBuffer
         out_stream::Base.TTY
         pty::PTY
-        terminal::LibGhosttyVT.Terminal
+        terminal::GhosttyVT.Terminal
         waiting::Bool
         step::EmulatedCondition
         filled::EmulatedCondition
@@ -104,7 +103,7 @@ module TerminalRegressionTests
         pty = PTY()
         EmulatedTerminal(
             IOBuffer(UInt8[]; read = true, write = true, append = true, truncate = true, maxsize = typemax(Int)),
-            Base.TTY(pty.slave), pty, LibGhosttyVT.Terminal(cols, rows),
+            Base.TTY(pty.slave), pty, GhosttyVT.Terminal(cols, rows),
             false, EmulatedCondition(), EmulatedCondition(), false)
     end
     if isdefined(REPL.LineEdit, :hascolor)
@@ -192,36 +191,37 @@ module TerminalRegressionTests
     const default_decorators = ['A':'Z'; 'a':'z'; '0':'9']
 
     # A blank cell whose style is invisible (no background, not inverse).
-    isblank((text, style)) = text == " " && style[5] == 0x00 && style[13] & 0x10 == 0
+    isblank(c::GhosttyVT.Cell) = (isempty(c.text) || c.text == " ") && c.style.bg === nothing && !c.style.inverse
 
     """
-        dump(contents::IO, decorator::IO, em::LibGhosttyVT.Terminal)
+        dump(contents::IO, decorator::IO, em::GhosttyVT.Terminal)
 
     Write the screen of `em`, including scrollback, as plain text to `contents`
     and as one decorator character per cell to `decorator`, where each distinct
     cell style gets its own character. Trailing blank cells and rows are dropped,
     except that the cursor's row is kept up to the cursor.
     """
-    function dump(contents::IO, decorator::IO, em::LibGhosttyVT.Terminal)
-        crow, ccol = cursor(em)
-        crow += LibGhosttyVT.total_rows(em) - LibGhosttyVT.active_rows(em)
-        rows = [cells(em, row) for row in 1:LibGhosttyVT.total_rows(em)]
+    function dump(contents::IO, decorator::IO, em::GhosttyVT.Terminal)
+        crow, ccol = GhosttyVT.cursor(em)
+        crow += GhosttyVT.nrows(em; scrollback = true) - GhosttyVT.nrows(em)
+        rows = GhosttyVT.cells(em; scrollback = true)
         for (i, row) in enumerate(rows)
             n = something(findlast(!isblank, row), 0)
             i == crow && (n = max(n, min(ccol - 1, length(row))))
             resize!(row, n)
         end
         nrows = max(crow, something(findlast(!isempty, rows), 0))
-        styles = Dict{LibGhosttyVT.Style, Char}()
+        styles = Dict{GhosttyVT.Style, Char}()
         available = copy(default_decorators)
         for (i, row) in enumerate(view(rows, 1:nrows))
             if i > 1
                 println(contents)
                 println(decorator)
             end
-            for (text, style) in row
-                print(contents, text)
-                print(decorator, get!(() -> popfirst!(available), styles, style))
+            for cell in row
+                cell.width == 0 && continue
+                print(contents, isempty(cell.text) ? " " : cell.text)
+                print(decorator, get!(() -> popfirst!(available), styles, cell.style))
             end
         end
     end

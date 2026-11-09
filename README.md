@@ -2,8 +2,9 @@
 
 [![CI](https://github.com/JuliaDebug/TerminalRegressionTests.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/JuliaDebug/TerminalRegressionTests.jl/actions/workflows/CI.yml)
 
-This package uses [libghostty-vt](https://lib.ghostty.org), the terminal
-emulation core of Ghostty, to provide automated testing of terminal based
+This package uses [GhosttyVT.jl](https://github.com/KristofferC/GhosttyVT.jl),
+a wrapper of [libghostty-vt](https://lib.ghostty.org), the terminal emulation
+core of Ghostty, to provide automated testing of terminal based
 applications. Both
 plain text and formatted output is supported. Each test consists of
 
@@ -53,11 +54,3 @@ where each distinct cell style (colors and attributes) gets its own character.
 Trailing blank cells and rows are not part of the screen, except on the
 cursor's row, which is kept up to the cursor. `TerminalRegressionTests.dump`
 writes this format for an emulator, e.g. for a custom comparison function.
-
-# libghostty-vt
-
-The library is loaded from the path in the `LIBGHOSTTY_VT` environment
-variable, or as `libghostty-vt` from the system library search path. To build
-it from a [release](https://release.files.ghostty.org/libghostty-vt/), see
-`PACKAGING-LIBGHOSTTY.md` in the release tarball; it needs the Zig version
-listed there.
